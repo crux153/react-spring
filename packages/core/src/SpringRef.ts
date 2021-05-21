@@ -7,6 +7,15 @@ interface ControllerUpdateFn<State extends Lookup = Lookup> {
   (i: number, ctrl: Controller<State>): ControllerUpdate<State> | Falsy
 }
 
+function noUnsafeEval() {
+  try {
+    new Function('')
+    return false
+  } catch (e) {
+    return true
+  }
+}
+
 /**
  * Extending from function allows SpringRef instances to be callable.
  * https://hackernoon.com/creating-callable-objects-in-javascript-d21l3te1
@@ -16,13 +25,35 @@ interface ControllerUpdateFn<State extends Lookup = Lookup> {
  * api.start({x: 3}) // this works
  * api({x: 3}) // this also works (non breaking from 9rc3)
  * ```
+ *
+ * Since extending Function is prohibited in CSP-enabled environment without `unsafe-eval`,
+ * simple check is employed here to disable the callable behavior.
+ *
+ * Note that it also can be disabled explicitly
+ * using a global variable `window.REACT_SPRING_DISABLE_CALLABLE_REF`.
+ *
+ * ```js
+ * window.REACT_SPRING_DISABLE_CALLABLE_REF = true
+ * ```
  */
-export class SpringRef<State extends Lookup = Lookup> extends Function {
-  readonly current: Controller<State>[] = []
-
-  constructor() {
-    super('return arguments.callee._call.apply(arguments.callee, arguments)')
+const ConditionalCallable = (() => {
+  if ((window as any).REACT_SPRING_DISABLE_CALLABLE_REF || noUnsafeEval()) {
+    return class {}
+  } else {
+    return class extends Function {
+      constructor() {
+        super(
+          'return arguments.callee._call.apply(arguments.callee, arguments)'
+        )
+      }
+    }
   }
+})()
+
+export class SpringRef<
+  State extends Lookup = Lookup
+> extends ConditionalCallable {
+  readonly current: Controller<State>[] = []
 
   /** @deprecated use the property 'start' instead */
   _call(props?: ControllerUpdate<State> | ControllerUpdateFn<State>) {
